@@ -1,4 +1,4 @@
-module github.com/assemblaj/nakamatest
+module github.com/assemblaj/ikemen-nakama
 
 go 1.20
 

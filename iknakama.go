@@ -1,4 +1,4 @@
-package nakamatest
+package iknakama
 
 import (
 	"context"
@@ -16,6 +16,8 @@ import (
 	"github.com/pion/stun"
 	"github.com/spf13/viper"
 )
+
+var debug bool = false
 
 type Session struct {
 	remoteIp      string
@@ -56,7 +58,6 @@ func (s *Session) PunchUDPPort(port string, close bool) (net.Conn, error) {
 	config := gole.ParseConfig([]string{"gole", "udp",
 		s.localIp + ":" + port,
 		s.remoteIp + ":" + port})
-	fmt.Println(config)
 	conn, err := gole.Punch(config)
 	if err != nil && close {
 		conn.Close()
@@ -77,7 +78,7 @@ func (s *Session) RemoteIP() string {
 }
 
 func getPublicIPFromSTUN() net.IP {
-	conn, err := net.Dial("udp", "stun.l.google.com:19302")
+	conn, err := net.Dial("udp4", "stun.l.google.com:19302")
 	if err != nil {
 		panic(err)
 	}
@@ -113,7 +114,7 @@ func getPublicIPFromSTUN() net.IP {
 }
 
 func getLocalIPAddress() (string, error) {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+	conn, err := net.Dial("udp4", "8.8.8.8:80")
 	if err != nil {
 		return "", err
 	}
@@ -125,7 +126,7 @@ func getLocalIPAddress() (string, error) {
 }
 
 type Config struct {
-	Urlstr    string `mapstructure:"urlstr"`
+	ServerUrl string `mapstructure:"server_url"`
 	ServerKey string `mapstructure:"server_key"`
 	Room      string `mapstructure:"room"`
 }
@@ -150,7 +151,7 @@ func joinNakamaRoom(target string, myPort int, config Config) (*nakama.Conn, con
 	ctx, _ := context.WithCancel(context.Background())
 
 	opts := []nakama.Option{
-		nakama.WithURL(config.Urlstr),
+		nakama.WithURL(config.ServerUrl),
 		nakama.WithServerKey(config.ServerKey),
 		nakama.WithExpiryGrace(480 * time.Second),
 	}
@@ -197,7 +198,6 @@ func InitiateP2PSession(serverConfig string, port int) (*Session, error) {
 }
 
 func exchangeP2PInformation(id string, conn *nakama.Conn, ctx context.Context, ch1 *nakama.ChannelMsg, myPort int, session *Session) (*Session, error) {
-	//ipsentto := make(map[string]bool)
 	ipCh := make(chan string, 1)
 	sentCh := make(chan bool)
 	portCh := make(chan string, 1)
@@ -209,7 +209,9 @@ func exchangeP2PInformation(id string, conn *nakama.Conn, ctx context.Context, c
 
 	conn.ChannelMessageHandler = func(ctx context.Context, msg *nakama.ChannelMessage) {
 		if msg.Username != id {
-			fmt.Printf("Received message: %s\n", msg.Content) // Add this line
+			if debug {
+				fmt.Printf("Received message: %s\n", msg.Content) // Add this line
+			}
 			var m map[string]interface{}
 			if err := json.Unmarshal([]byte(msg.Content), &m); err != nil {
 				log.Fatal(err)
@@ -227,7 +229,9 @@ func exchangeP2PInformation(id string, conn *nakama.Conn, ctx context.Context, c
 					"msg":  session.localPublicIp + ":" + strconv.Itoa(myPort),
 					"code": float64(15),
 				}
-				log.Printf("Sending IP: %+v\n", ipMsg) // Add this line
+				if debug {
+					log.Printf("Sending IP: %+v\n", ipMsg) // Add this line
+				}
 				if _, err := conn.ChannelMessageSend(ctx, ch1.Id, ipMsg); err != nil {
 					if err.Error() != "context canceled" {
 						log.Fatalf("expected no error, got: %v", err)
@@ -260,8 +264,9 @@ func exchangeP2PInformation(id string, conn *nakama.Conn, ctx context.Context, c
 					panic(err)
 				}
 
-				// ports := []int{portInt, 7550, 7600}
-				fmt.Println(portInt)
+				if debug {
+					fmt.Println(portInt)
+				}
 				<-sentCh
 				localAddr, _ := getLocalIPAddress()
 
@@ -295,15 +300,19 @@ func exchangeP2PInformation(id string, conn *nakama.Conn, ctx context.Context, c
 					log.Fatalf("expected no error, got: %v", err)
 				}
 			}
-			fmt.Printf("Sent hello message: %+v\n", helloMsg) // Add this line
+			if debug {
+				fmt.Printf("Sent hello message: %+v\n", helloMsg)
+			}
 		}
 	}()
 
 	select {
 	case <-doneCh: // Wait here until IP and port are obtained
-		fmt.Println("Returning IP and Port")
-		fmt.Println(session.remoteIp)
-		fmt.Println(session.remotePort)
+		if debug {
+			fmt.Println("Returning IP and Port")
+			fmt.Println(session.remoteIp)
+			fmt.Println(session.remotePort)
+		}
 		return session, nil
 	case <-timeout: // Timeout occurred before IP and port were obtained
 		return nil, fmt.Errorf("timeout waiting for IP and port")
